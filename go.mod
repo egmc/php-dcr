@@ -1,8 +1,9 @@
 module github.com/egmc/php-dcr
 
-go 1.21.5
+go 1.24.0
 
-require (
-	github.com/aquasecurity/libbpfgo v0.1.1 // indirect
-	golang.org/x/sys v0.0.0-20210514084401-e8d321eab015 // indirect
-)
+toolchain go1.24.10
+
+require github.com/aquasecurity/libbpfgo v0.9.2-libbpf-1.5.1
+
+require golang.org/x/sys v0.37.0 // indirect
