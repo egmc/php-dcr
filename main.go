@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-	"unsafe"
 
 	bpf "github.com/aquasecurity/libbpfgo"
 )
@@ -95,7 +94,7 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 
 	for iter.Next() {
 		keyBytes := iter.Key()
-		valueBytes := iter.Value()
+		// valueBytes := iter.Value()
 
 		// Parse the key (CallT structure)
 		var call CallT
@@ -106,20 +105,20 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 		}
 
 		// Parse the value (u64)
-		var value uint64
-		reader = bytes.NewReader(valueBytes)
-		if err := binary.Read(reader, binary.LittleEndian, &value); err != nil {
-			log.Printf("Failed to parse value: %v", err)
-			continue
-		}
+		// var value uint64
+		// reader = bytes.NewReader(valueBytes)
+		// if err := binary.Read(reader, binary.LittleEndian, &value); err != nil {
+		// 	log.Printf("Failed to parse value: %v", err)
+		// 	continue
+		// }
 
-		// Convert filename from byte array to string
-		filename := bytesToString(call.Filename[:])
+		// // Convert filename from byte array to string
+		// filename := bytesToString(call.Filename[:])
 
-		if filename != "" {
-			fmt.Printf("%-60s %d\n", filename, value)
-			count++
-		}
+		// if filename != "" {
+		// 	fmt.Printf("%-60s %d\n", filename, value)
+		// 	count++
+		// }
 	}
 
 	if count == 0 {
@@ -130,10 +129,3 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 }
 
 // bytesToString converts a null-terminated byte array to a string
-func bytesToString(b []byte) string {
-	n := bytes.IndexByte(b, 0)
-	if n == -1 {
-		n = len(b)
-	}
-	return *(*string)(unsafe.Pointer(&b[:n]))
-}
