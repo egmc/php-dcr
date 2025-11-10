@@ -15,7 +15,7 @@ struct {
     __uint(max_entries, 65536);
     __type(key, struct call_t);
     __type(value, u64);
-} php_compile_file_total SEC(".maps");
+} php_compile_file SEC(".maps");
 
 
 
@@ -39,6 +39,7 @@ SEC("usdt//usr/lib/apache2/modules/libphp8.1.so:php:compile__file__entry")
 int BPF_USDT(do_count, char *arg0, char *arg1) 
 {
     struct call_t call = {};
+    u64 ts = bpf_ktime_get_ns();
 
     bpf_probe_read_user_str(&call.filename, sizeof(call.filename), arg1);
 
@@ -46,8 +47,9 @@ int BPF_USDT(do_count, char *arg0, char *arg1)
 
     static const char fmtstr[] = "compile file entry: %s, %s\n"; 
     bpf_trace_printk(fmtstr, sizeof(fmtstr), arg0, arg1);
+    bpf_map_update_elem(&php_compile_file, &call, &ts, BPF_ANY);
+    // increment_map(&php_compile_file_total, &call, 1);
 
-    increment_map(&php_compile_file_total, &call, 1);
 
     return 0;
 }
