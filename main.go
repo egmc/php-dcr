@@ -48,7 +48,11 @@ func main() {
 
 	// Attach USDT probe
 	// Adjust the path to your PHP library if different
-	_, err = prog.AttachUSDT(-1, "/usr/lib/apache2/modules/libphp8.1.so", "php", "compile__file__entry")
+	// _, err = prog.AttachUSDT(-1, "/usr/lib/apache2/modules/libphp8.1.so", "php", "compile__file__entry")
+	// if err != nil {
+	// 	log.Fatalf("Failed to attach USDT probe: %v", err)
+	// }
+	_, err = prog.AttachGeneric()
 	if err != nil {
 		log.Fatalf("Failed to attach USDT probe: %v", err)
 	}
@@ -57,7 +61,7 @@ func main() {
 	log.Println("Monitoring PHP compile events... (Press Ctrl+C to exit)")
 
 	// Get the BPF map
-	bpfMap, err := bpfModule.GetMap("php_compile_file_total")
+	bpfMap, err := bpfModule.GetMap("php_compile_file")
 	if err != nil {
 		log.Fatalf("Failed to get BPF map: %v", err)
 	}

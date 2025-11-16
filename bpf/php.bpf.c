@@ -1,4 +1,4 @@
-#include <vmlinux.h>
+#include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/usdt.bpf.h>
 #include "maps.bpf.h"
@@ -20,20 +20,20 @@ struct {
 
 
 
-// int truncate_string(char *str, int max_length) {
-//     int i;
+int truncate_string(char *str, int max_length) {
+    int i;
 
-//     // 文字列を後ろからチェック
-//     for (i = max_length - 1; i >= 0; i--) {
-//         if (str[i] == '/') {
-//             return i; 
-//         } else {
-//             str[i] = '\0';
-//         }
-//     }
+    // 文字列を後ろからチェック
+    for (i = max_length - 1; i >= 0; i--) {
+        if (str[i] == '/') {
+            return i; 
+        } else {
+            str[i] = '\0';
+        }
+    }
 
-//     return -1;
-// }
+    return -1;
+}
 
 SEC("usdt//usr/lib/apache2/modules/libphp8.1.so:php:compile__file__entry")
 int BPF_USDT(do_count, char *arg0, char *arg1) 
@@ -43,7 +43,7 @@ int BPF_USDT(do_count, char *arg0, char *arg1)
 
     bpf_probe_read_user_str(&call.filename, sizeof(call.filename), arg1);
 
-    // truncate_string(call.filename, MAX_STR_LEN);
+    truncate_string(call.filename, MAX_STR_LEN);
 
     static const char fmtstr[] = "compile file entry: %s, %s\n"; 
     bpf_trace_printk(fmtstr, sizeof(fmtstr), arg0, arg1);
