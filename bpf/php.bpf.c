@@ -1,7 +1,6 @@
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/usdt.bpf.h>
-#include "maps.bpf.h"
 
 #define MAX_STR_LEN 256
 
@@ -41,12 +40,14 @@ int BPF_USDT(do_count, char *arg0, char *arg1)
     struct call_t call = {};
     u64 ts = bpf_ktime_get_ns();
 
+    static const char fmtstr[] = "compile file entry: %s, %s\n"; 
+    bpf_trace_printk(fmtstr, sizeof(fmtstr), arg0, arg1);
+
+
     bpf_probe_read_user_str(&call.filename, sizeof(call.filename), arg1);
 
     truncate_string(call.filename, MAX_STR_LEN);
 
-    static const char fmtstr[] = "compile file entry: %s, %s\n"; 
-    bpf_trace_printk(fmtstr, sizeof(fmtstr), arg0, arg1);
     bpf_map_update_elem(&php_compile_file, &call, &ts, BPF_ANY);
     // increment_map(&php_compile_file_total, &call, 1);
 
