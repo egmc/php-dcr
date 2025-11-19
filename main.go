@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -110,7 +112,25 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 			continue
 		}
 
-		fmt.Printf("%d\n", v)
+		fmt.Printf(byteArrayToString(call.Filename))
+
+		var n int64
+
+		buf := bytes.NewReader(v)
+		err := binary.Read(buf, binary.LittleEndian, &n)
+		if err != nil {
+			panic(err)
+		}
+
+		// fmt.Println(n)
+		boottime, _ := getBootTimeUnix()
+		compiletime := boottime + n/1000/1000
+
+		t := time.Unix(compiletime, 0)
+		// ローカルタイムゾーンに変換
+		tLocal := t.Local()
+		fmt.Println(tLocal)
+
 		// Convert filename from byte array to string
 		// filename := bytesToString(call.Filename[:])
 
@@ -126,4 +146,30 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 		fmt.Printf("\nTotal unique files: %d\n", count)
 	}
 
+}
+func byteArrayToString(b [256]byte) string {
+	// null文字までを取得
+	if n := bytes.IndexByte(b[:], 0); n != -1 {
+		return string(b[:n])
+	}
+	return string(b[:])
+}
+
+func getBootTimeUnix() (int64, error) {
+	// /proc/uptimeを読み取る
+	data, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return 0, err
+	}
+
+	// uptimeの秒数を取得（最初の値）
+	fields := strings.Fields(string(data))
+	uptimeSeconds, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0, err
+	}
+
+	// 現在時刻からuptimeを引いてブート時刻を計算
+	bootTime := time.Now().Add(-time.Duration(uptimeSeconds) * time.Second)
+	return bootTime.Unix(), nil
 }
