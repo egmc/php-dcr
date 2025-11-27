@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -28,45 +28,56 @@ type CallT struct {
 func main() {
 	// Check if running as root
 	if os.Geteuid() != 0 {
-		log.Fatal("This program must be run as root (sudo)")
+		slog.Error("This program must be run as root (sudo)")
+		os.Exit(1)
 	}
 
 	// Load the eBPF object file
 	bpfModule, err := bpf.NewModuleFromFile("bpf/php.bpf.o")
 	if err != nil {
-		log.Fatalf("Failed to load eBPF module: %v", err)
+		slog.Error("Failed to load eBPF module", "error", err)
+		os.Exit(1)
 	}
 	defer bpfModule.Close()
 
 	// Load the eBPF program into the kernel
 	if err := bpfModule.BPFLoadObject(); err != nil {
-		log.Fatalf("Failed to load eBPF object: %v", err)
+		slog.Error("Failed to load eBPF object", "error", err)
+		os.Exit(1)
 	}
 
 	// Get the USDT program
 	prog, err := bpfModule.GetProgram("do_count")
 	if err != nil {
-		log.Fatalf("Failed to get eBPF program: %v", err)
+		slog.Error("Failed to get eBPF program", "error", err)
+		os.Exit(1)
 	}
 
+	slog.Info("prog", prog.GetName())
+	slog.Info("pin path", prog.GetPinPath())
+	slog.Info("section name", prog.GetSectionName())
+
+	_, err = prog.AttachGeneric()
+	if err != nil {
+		slog.Error("Failed to attach USDT probe", "error", err)
+		os.Exit(1)
+	}
 	// Attach USDT probe
 	// Adjust the path to your PHP library if different
 	// _, err = prog.AttachUSDT(-1, "/usr/lib/apache2/modules/libphp8.1.so", "php", "compile__file__entry")
 	// if err != nil {
-	// 	log.Fatalf("Failed to attach USDT probe: %v", err)
+	// 	slog.Error("Failed to attach USDT probe", "error", err)
+	// 	os.Exit(1)
 	// }
-	_, err = prog.AttachGeneric()
-	if err != nil {
-		log.Fatalf("Failed to attach USDT probe: %v", err)
-	}
 
-	log.Println("eBPF program loaded and attached successfully")
-	log.Println("Monitoring PHP compile events... (Press Ctrl+C to exit)")
+	slog.Info("eBPF program loaded and attached successfully")
+	slog.Info("Monitoring PHP compile events... (Press Ctrl+C to exit)")
 
 	// Get the BPF map
 	bpfMap, err := bpfModule.GetMap("php_compile_file")
 	if err != nil {
-		log.Fatalf("Failed to get BPF map: %v", err)
+		slog.Error("Failed to get BPF map", "error", err)
+		os.Exit(1)
 	}
 
 	// Setup signal handler for graceful shutdown
@@ -81,7 +92,7 @@ func main() {
 	for {
 		select {
 		case <-sig:
-			log.Println("\nShutting down...")
+			slog.Info("Shutting down...")
 			return
 		case <-ticker.C:
 			// Read and display map contents
@@ -108,7 +119,7 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 		var call CallT
 		reader := bytes.NewReader(keyBytes)
 		if err := binary.Read(reader, binary.LittleEndian, &call); err != nil {
-			log.Printf("Failed to parse key: %v", err)
+			slog.Error("Failed to parse key", "error", err)
 			continue
 		}
 
