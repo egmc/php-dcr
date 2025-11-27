@@ -57,18 +57,19 @@ func main() {
 	slog.Info("pin path", prog.GetPinPath())
 	slog.Info("section name", prog.GetSectionName())
 
-	_, err = prog.AttachGeneric()
-	if err != nil {
-		slog.Error("Failed to attach USDT probe", "error", err)
-		os.Exit(1)
-	}
-	// Attach USDT probe
-	// Adjust the path to your PHP library if different
-	// _, err = prog.AttachUSDT(-1, "/usr/lib/apache2/modules/libphp8.1.so", "php", "compile__file__entry")
+	// _, err = prog.AttachGeneric()
 	// if err != nil {
 	// 	slog.Error("Failed to attach USDT probe", "error", err)
 	// 	os.Exit(1)
 	// }
+	// Attach USDT probe
+	// Adjust the path to your PHP library if different
+	// _, err = prog.AttachUSDT(-1, "/usr/lib/apache2/modules/libphp8.1.so", "php", "compile__file__entry")
+	_, err = prog.AttachUSDT(-1, "/usr/local/lib/libphp.so", "php", "compile__file__entry")
+	if err != nil {
+		slog.Error("Failed to attach USDT probe", "error", err)
+		os.Exit(1)
+	}
 
 	slog.Info("eBPF program loaded and attached successfully")
 	slog.Info("Monitoring PHP compile events... (Press Ctrl+C to exit)")
