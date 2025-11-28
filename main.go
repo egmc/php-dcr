@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -15,6 +16,67 @@ import (
 
 	bpf "github.com/aquasecurity/libbpfgo"
 )
+
+// searchDirs defines the directories to search for PHP binaries
+var searchDirs = []string{
+	"/usr/lib/apache2/modules",
+	"/usr/bin",
+}
+
+// findPHPBinaries searches for files containing "php" in their names
+// and returns unique files based on inode to avoid duplicate attachments
+func findPHPBinaries() ([]string, error) {
+	seenInodes := make(map[uint64]string) // inode -> first found path
+	var result []string
+
+	for _, dir := range searchDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			slog.Warn("Failed to read directory", "dir", dir, "error", err)
+			continue
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+
+			name := entry.Name()
+			// Match files containing "libphp" or named exactly "php" or "php-fpm"
+			if !strings.Contains(name, "libphp") && name != "php" && name != "php-fpm" {
+				continue
+			}
+
+			fullPath := filepath.Join(dir, name)
+
+			// Get file info to check inode
+			info, err := os.Stat(fullPath)
+			if err != nil {
+				slog.Warn("Failed to stat file", "path", fullPath, "error", err)
+				continue
+			}
+
+			// Get inode from syscall.Stat_t
+			stat, ok := info.Sys().(*syscall.Stat_t)
+			if !ok {
+				slog.Warn("Failed to get stat_t", "path", fullPath)
+				continue
+			}
+
+			inode := stat.Ino
+			if existingPath, exists := seenInodes[inode]; exists {
+				slog.Info("Skipping duplicate inode", "path", fullPath, "sameAs", existingPath, "inode", inode)
+				continue
+			}
+
+			seenInodes[inode] = fullPath
+			result = append(result, fullPath)
+			slog.Info("Found PHP binary", "path", fullPath, "inode", inode)
+		}
+	}
+
+	return result, nil
+}
 
 const (
 	maxStrLen = 256
@@ -53,24 +115,40 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("prog", prog.GetName())
-	slog.Info("pin path", prog.GetPinPath())
-	slog.Info("section name", prog.GetSectionName())
+	slog.Info("prog", prog.Name())
+	slog.Info("pin path", prog.PinPath())
+	slog.Info("section name", prog.SectionName())
 
-	_, err = prog.AttachGeneric()
+	// Find PHP binaries to attach to
+	phpBinaries, err := findPHPBinaries()
 	if err != nil {
-		slog.Error("Failed to attach USDT probe", "error", err)
+		slog.Error("Failed to find PHP binaries", "error", err)
 		os.Exit(1)
 	}
-	// Attach USDT probe
-	// Adjust the path to your PHP library if different
-	// _, err = prog.AttachUSDT(-1, "/usr/lib/apache2/modules/libphp8.1.so", "php", "compile__file__entry")
-	// if err != nil {
-	// 	slog.Error("Failed to attach USDT probe", "error", err)
-	// 	os.Exit(1)
-	// }
 
-	slog.Info("eBPF program loaded and attached successfully")
+	if len(phpBinaries) == 0 {
+		slog.Error("No PHP binaries found in search directories", "dirs", searchDirs)
+		os.Exit(1)
+	}
+
+	// Attach USDT probe to each found PHP binary
+	attachedCount := 0
+	for _, binaryPath := range phpBinaries {
+		_, err = prog.AttachUSDT(-1, binaryPath, "php", "compile__file__entry")
+		if err != nil {
+			slog.Warn("Failed to attach USDT probe", "path", binaryPath, "error", err)
+			continue
+		}
+		slog.Info("Attached USDT probe", "path", binaryPath)
+		attachedCount++
+	}
+
+	if attachedCount == 0 {
+		slog.Error("Failed to attach to any PHP binary")
+		os.Exit(1)
+	}
+
+	slog.Info("eBPF program loaded and attached successfully", "attachedCount", attachedCount)
 	slog.Info("Monitoring PHP compile events... (Press Ctrl+C to exit)")
 
 	// Get the BPF map
