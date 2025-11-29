@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/binary"
 	"fmt"
 	"log/slog"
@@ -14,8 +15,12 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/aquasecurity/libbpfgo"
 	bpf "github.com/aquasecurity/libbpfgo"
 )
+
+//go:embed bpf/php.bpf.o
+var bpfObject []byte
 
 // searchDirs defines the directories to search for PHP binaries
 var searchDirs = []string{
@@ -95,10 +100,16 @@ func main() {
 	}
 
 	// Load the eBPF object file
-	bpfModule, err := bpf.NewModuleFromFile("bpf/php.bpf.o")
+	// bpfModule, err := bpf.NewModuleFromFile("bpf/php.bpf.o")
+	// if err != nil {
+	// 	slog.Error("Failed to load eBPF module", "error", err)
+	// 	os.Exit(1)
+	// }
+	// defer bpfModule.Close()
+	// バイトスライスから直接ロード
+	bpfModule, err := libbpfgo.NewModuleFromBuffer(bpfObject, "program")
 	if err != nil {
-		slog.Error("Failed to load eBPF module", "error", err)
-		os.Exit(1)
+		panic(err)
 	}
 	defer bpfModule.Close()
 
