@@ -84,13 +84,8 @@ func findPHPBinaries() ([]string, error) {
 }
 
 const (
-	maxStrLen = 256
+	MapKeyStrLen = 512
 )
-
-// CallT represents the key structure in the BPF map
-type CallT struct {
-	Filename [maxStrLen]byte
-}
 
 func main() {
 	// Check if running as root
@@ -120,7 +115,7 @@ func main() {
 	}
 
 	// Get the USDT program
-	prog, err := bpfModule.GetProgram("do_count")
+	prog, err := bpfModule.GetProgram("compile_file_return")
 	if err != nil {
 		slog.Error("Failed to get eBPF program", "error", err)
 		os.Exit(1)
@@ -145,7 +140,7 @@ func main() {
 	// Attach USDT probe to each found PHP binary
 	attachedCount := 0
 	for _, binaryPath := range phpBinaries {
-		_, err = prog.AttachUSDT(-1, binaryPath, "php", "compile__file__entry")
+		_, err = prog.AttachUSDT(-1, binaryPath, "php", "compile__file__return")
 		if err != nil {
 			slog.Warn("Failed to attach USDT probe", "path", binaryPath, "error", err)
 			continue
@@ -204,15 +199,8 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 
 		v, _ := bpfMap.GetValue(unsafe.Pointer(&keyBytes[0]))
 
-		// Parse the key (CallT structure)
-		var call CallT
-		reader := bytes.NewReader(keyBytes)
-		if err := binary.Read(reader, binary.LittleEndian, &call); err != nil {
-			slog.Error("Failed to parse key", "error", err)
-			continue
-		}
-
-		fmt.Printf(byteArrayToString(call.Filename))
+		filename := cstring(keyBytes)
+		slog.Info(filename)
 
 		var n int64
 
@@ -222,22 +210,17 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 			panic(err)
 		}
 
-		// fmt.Println(n)
 		boottime, _ := getBootTimeUnix()
-		compiletime := boottime + n/1000/1000
+		compiletime := boottime + n/1000/1000/1000
 
 		t := time.Unix(compiletime, 0)
 		// ローカルタイムゾーンに変換
 		tLocal := t.Local()
-		fmt.Println(tLocal)
+		slog.Info(tLocal.Format(time.RFC3339))
 
-		// Convert filename from byte array to string
-		// filename := bytesToString(call.Filename[:])
+		bpfMap.DeleteKey(unsafe.Pointer(&keyBytes[0]))
+		slog.Info(filename + " deleted")
 
-		// if filename != "" {
-		// 	fmt.Printf("%-60s %d\n", filename, value)
-		// 	count++
-		// }
 	}
 
 	if count == 0 {
@@ -247,12 +230,13 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 	}
 
 }
-func byteArrayToString(b [256]byte) string {
-	// null文字までを取得
-	if n := bytes.IndexByte(b[:], 0); n != -1 {
-		return string(b[:n])
+func cstring(b []byte) string {
+	for i, v := range b {
+		if v == 0 {
+			return string(b[:i])
+		}
 	}
-	return string(b[:])
+	return string(b)
 }
 
 func getBootTimeUnix() (int64, error) {
