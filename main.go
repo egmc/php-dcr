@@ -17,6 +17,7 @@ import (
 
 	"github.com/aquasecurity/libbpfgo"
 	bpf "github.com/aquasecurity/libbpfgo"
+	"github.com/spf13/cobra"
 )
 
 //go:embed bpf/php.bpf.o
@@ -87,11 +88,29 @@ const (
 	MapKeyStrLen = 512
 )
 
+var targetDir string
+
+var rootCmd = &cobra.Command{
+	Use:   "php-dcr",
+	Short: "PHP Dead Code Reporter - Monitor PHP compile events using eBPF",
+	RunE:  run,
+}
+
+func init() {
+	rootCmd.Flags().StringVar(&targetDir, "target-dir", "", "Target directory to monitor")
+	rootCmd.MarkFlagRequired("target-dir")
+}
+
 func main() {
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func run(cmd *cobra.Command, args []string) error {
 	// Check if running as root
 	if os.Geteuid() != 0 {
-		slog.Error("This program must be run as root (sudo)")
-		os.Exit(1)
+		return fmt.Errorf("this program must be run as root (sudo)")
 	}
 
 	// Load the eBPF object file
@@ -104,21 +123,19 @@ func main() {
 	// バイトスライスから直接ロード
 	bpfModule, err := libbpfgo.NewModuleFromBuffer(bpfObject, "program")
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("failed to load eBPF module: %w", err)
 	}
 	defer bpfModule.Close()
 
 	// Load the eBPF program into the kernel
 	if err := bpfModule.BPFLoadObject(); err != nil {
-		slog.Error("Failed to load eBPF object", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to load eBPF object: %w", err)
 	}
 
 	// Get the USDT program
 	prog, err := bpfModule.GetProgram("compile_file_return")
 	if err != nil {
-		slog.Error("Failed to get eBPF program", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to get eBPF program: %w", err)
 	}
 
 	slog.Info("prog", prog.Name())
@@ -128,13 +145,11 @@ func main() {
 	// Find PHP binaries to attach to
 	phpBinaries, err := findPHPBinaries()
 	if err != nil {
-		slog.Error("Failed to find PHP binaries", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to find PHP binaries: %w", err)
 	}
 
 	if len(phpBinaries) == 0 {
-		slog.Error("No PHP binaries found in search directories", "dirs", searchDirs)
-		os.Exit(1)
+		return fmt.Errorf("no PHP binaries found in search directories: %v", searchDirs)
 	}
 
 	// Attach USDT probe to each found PHP binary
@@ -150,8 +165,7 @@ func main() {
 	}
 
 	if attachedCount == 0 {
-		slog.Error("Failed to attach to any PHP binary")
-		os.Exit(1)
+		return fmt.Errorf("failed to attach to any PHP binary")
 	}
 
 	slog.Info("eBPF program loaded and attached successfully", "attachedCount", attachedCount)
@@ -160,8 +174,7 @@ func main() {
 	// Get the BPF map
 	bpfMap, err := bpfModule.GetMap("php_compile_file")
 	if err != nil {
-		slog.Error("Failed to get BPF map", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to get BPF map: %w", err)
 	}
 
 	// Setup signal handler for graceful shutdown
@@ -177,7 +190,7 @@ func main() {
 		select {
 		case <-sig:
 			slog.Info("Shutting down...")
-			return
+			return nil
 		case <-ticker.C:
 			// Read and display map contents
 			displayMapContents(bpfMap)
@@ -187,6 +200,7 @@ func main() {
 
 // displayMapContents reads and displays the contents of the BPF map
 func displayMapContents(bpfMap *bpf.BPFMap) {
+	slog.Info("target directory", "target-dir", targetDir)
 	fmt.Println("\n=== PHP Compile File Statistics ===")
 	fmt.Printf("%-60s %s\n", "Filename", "Count")
 	fmt.Println("-----------------------------------------------------------")
@@ -220,6 +234,7 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 
 		bpfMap.DeleteKey(unsafe.Pointer(&keyBytes[0]))
 		slog.Info(filename + " deleted")
+		count++
 
 	}
 
