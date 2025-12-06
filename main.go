@@ -122,6 +122,11 @@ func main() {
 }
 
 func run(cmd *cobra.Command, args []string) error {
+	// Validate targetDir is not empty
+	if targetDir == "" {
+		return fmt.Errorf("--target-dir must not be empty")
+	}
+
 	// Check if running as root
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("this program must be run as root (sudo)")
@@ -250,8 +255,10 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 		boottime, _ := getBootTimeUnix()
 		compiletime := boottime + n/1000/1000/1000
 
-		// Store filepath and compiled_time_unix in global map
-		phpCompiled[filename] = compiletime
+		// Store filepath and compiled_time_unix in global map only if it matches targetDir
+		if strings.HasPrefix(filename, targetDir) {
+			phpCompiled[filename] = compiletime
+		}
 
 		t := time.Unix(compiletime, 0)
 		// ローカルタイムゾーンに変換
