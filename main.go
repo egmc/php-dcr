@@ -257,6 +257,7 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 
 		// Store filepath and compiled_time_unix in global map only if it matches targetDir
 		if strings.HasPrefix(filename, targetDir) {
+			// slog.Info("matched", "filaname", filename)
 			phpCompiled[filename] = compiletime
 		}
 
