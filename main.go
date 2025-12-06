@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -92,13 +93,100 @@ const (
 
 var targetDir string
 
+// targetFileList stores absolute paths of PHP files in targetDir (atomic for concurrent access)
+var targetFileList atomic.Value // stores []string
+
 // phpCompiled stores filepath -> compiled_time_unix mapping
 var phpCompiled = make(map[string]int64)
+
+// findPHPFiles recursively searches for PHP files in the given directory
+// and returns their absolute paths
+func findPHPFiles(dir string) ([]string, error) {
+	var files []string
+
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			slog.Warn("Failed to access path", "path", path, "error", err)
+			return nil // continue walking
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		if strings.HasSuffix(strings.ToLower(d.Name()), ".php") {
+			absPath, err := filepath.Abs(path)
+			if err != nil {
+				slog.Warn("Failed to get absolute path", "path", path, "error", err)
+				return nil
+			}
+			files = append(files, absPath)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
+// updateTargetFileList updates the targetFileList atomically
+func updateTargetFileList() {
+	files, err := findPHPFiles(targetDir)
+	if err != nil {
+		slog.Error("Failed to update target file list", "error", err)
+		return
+	}
+
+	targetFileList.Store(files)
+	slog.Info("Updated target file list", "count", len(files))
+}
+
+// startFileListUpdater starts a goroutine that updates targetFileList every 5 minutes
+func startFileListUpdater(stopCh <-chan struct{}) {
+	// Initial update
+	updateTargetFileList()
+
+	ticker := time.NewTicker(5 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopCh:
+				slog.Info("Stopping file list updater")
+				return
+			case <-ticker.C:
+				updateTargetFileList()
+			}
+		}
+	}()
+}
+
+// getTargetFileList returns the current target file list
+func getTargetFileList() []string {
+	if v := targetFileList.Load(); v != nil {
+		return v.([]string)
+	}
+	return nil
+}
 
 // handlePhpCompiledInfo returns phpCompiled as JSON
 func handlePhpCompiledInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(phpCompiled); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+// handlePhpFileList returns targetFileList as JSON
+func handlePhpFileList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	files := getTargetFileList()
+	if err := json.NewEncoder(w).Encode(files); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -200,8 +288,13 @@ func run(cmd *cobra.Command, args []string) error {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 
+	// Start file list updater (updates every 5 minutes)
+	stopFileListUpdater := make(chan struct{})
+	startFileListUpdater(stopFileListUpdater)
+
 	// Start HTTP server
 	http.HandleFunc("/v1/php_compiled_info", handlePhpCompiledInfo)
+	http.HandleFunc("/v1/php_file_list", handlePhpFileList)
 	go func() {
 		slog.Info("Starting HTTP server on :8080")
 		if err := http.ListenAndServe(":8080", nil); err != nil {
@@ -218,6 +311,7 @@ func run(cmd *cobra.Command, args []string) error {
 		select {
 		case <-sig:
 			slog.Info("Shutting down...")
+			close(stopFileListUpdater)
 			return nil
 		case <-ticker.C:
 			// Read and display map contents
