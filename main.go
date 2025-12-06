@@ -4,8 +4,10 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -89,6 +91,18 @@ const (
 )
 
 var targetDir string
+
+// phpCompiled stores filepath -> compiled_time_unix mapping
+var phpCompiled = make(map[string]int64)
+
+// handlePhpCompiledInfo returns phpCompiled as JSON
+func handlePhpCompiledInfo(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(phpCompiled); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "php-dcr",
@@ -181,6 +195,15 @@ func run(cmd *cobra.Command, args []string) error {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 
+	// Start HTTP server
+	http.HandleFunc("/v1/php_compiled_info", handlePhpCompiledInfo)
+	go func() {
+		slog.Info("Starting HTTP server on :8080")
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			slog.Error("HTTP server error", "error", err)
+		}
+	}()
+
 	// Ticker for periodic map reading (every 5 seconds)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -226,6 +249,9 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 
 		boottime, _ := getBootTimeUnix()
 		compiletime := boottime + n/1000/1000/1000
+
+		// Store filepath and compiled_time_unix in global map
+		phpCompiled[filename] = compiletime
 
 		t := time.Unix(compiletime, 0)
 		// ローカルタイムゾーンに変換
