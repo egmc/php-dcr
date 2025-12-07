@@ -99,6 +99,26 @@ var targetFileList atomic.Value // stores []string
 // phpCompiled stores filepath -> compiled_time_unix mapping
 var phpCompiled = make(map[string]int64)
 
+// scriptStartTime stores the time when this process started
+var scriptStartTime time.Time
+
+// Report response structs
+type ScriptInfo struct {
+	StartTimeUnix    int64  `json:"start_time_unix"`
+	StartTimeRFC3339 string `json:"start_time_rfc3339"`
+}
+
+type FileReport struct {
+	Filepath           string `json:"filepath"`
+	CompiledTimeUnix   int64  `json:"compiled_time_unix"`
+	CompiledTimeRFC3339 string `json:"compiled_time_rfc3339"`
+}
+
+type ReportResponse struct {
+	Script ScriptInfo   `json:"script"`
+	Report []FileReport `json:"report"`
+}
+
 // findPHPFiles recursively searches for PHP files in the given directory
 // and returns their absolute paths
 func findPHPFiles(dir string) ([]string, error) {
@@ -192,6 +212,43 @@ func handlePhpFileList(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleReport returns the report with script info and file compilation status
+func handleReport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	files := getTargetFileList()
+	reports := make([]FileReport, 0, len(files))
+
+	for _, filepath := range files {
+		var compiledTimeUnix int64 = -1
+		var compiledTimeRFC3339 string = ""
+
+		if t, ok := phpCompiled[filepath]; ok {
+			compiledTimeUnix = t
+			compiledTimeRFC3339 = time.Unix(t, 0).Local().Format(time.RFC3339)
+		}
+
+		reports = append(reports, FileReport{
+			Filepath:           filepath,
+			CompiledTimeUnix:   compiledTimeUnix,
+			CompiledTimeRFC3339: compiledTimeRFC3339,
+		})
+	}
+
+	response := ReportResponse{
+		Script: ScriptInfo{
+			StartTimeUnix:    scriptStartTime.Unix(),
+			StartTimeRFC3339: scriptStartTime.Format(time.RFC3339),
+		},
+		Report: reports,
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "php-dcr",
 	Short: "PHP Dead Code Reporter - Monitor PHP compile events using eBPF",
@@ -210,6 +267,9 @@ func main() {
 }
 
 func run(cmd *cobra.Command, args []string) error {
+	// Record script start time
+	scriptStartTime = time.Now()
+
 	// Validate targetDir is not empty
 	if targetDir == "" {
 		return fmt.Errorf("--target-dir must not be empty")
@@ -295,6 +355,7 @@ func run(cmd *cobra.Command, args []string) error {
 	// Start HTTP server
 	http.HandleFunc("/v1/php_compiled_info", handlePhpCompiledInfo)
 	http.HandleFunc("/v1/php_file_list", handlePhpFileList)
+	http.HandleFunc("/v1/report", handleReport)
 	go func() {
 		slog.Info("Starting HTTP server on :8080")
 		if err := http.ListenAndServe(":8080", nil); err != nil {
