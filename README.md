@@ -1,26 +1,26 @@
 PHP Dead Code Reporter
 =====================
 
-eBPFを使用してPHPのコンパイルイベントを監視し、実行されているファイルを追跡するツールです。
+A tool that uses eBPF to monitor PHP compile events and track file execution within a specified directory. Useful for detecting dead code (unused PHP files).
 
-## 概要
+## Overview
 
-このプロジェクトは、USDT（User-level Statically Defined Tracing）プローブを使用してPHPのコンパイルイベントを追跡します。eBPFプログラムがカーネル空間で実行され、コンパイルされたPHPファイルの情報をBPF MAPに保存します。Goアプリケーションは定期的にこのマップを読み取り、統計情報を表示します。
+This project uses USDT (User-level Statically Defined Tracing) probes to track PHP `compile__file__return` events. An eBPF program runs in kernel space and stores compiled PHP file paths with timestamps in a BPF MAP. The Go application periodically reads this map and provides reports via HTTP API.
 
-## 必要要件
+## Requirements
 
-### システム要件
-- Linux カーネル 5.4 以降（eBPF CO-RE サポート）
-- root権限
+### System Requirements
+- Linux kernel 5.4 or later (eBPF CO-RE support)
+- Root privileges
 
-### ソフトウェア要件
-- Go 1.19 以降
-- clang 10 以降
+### Software Requirements
+- Go 1.24 or later
+- clang 10 or later
 - libbpf
 - bpftool
 - Linux headers
 
-### Ubuntu/Debianでのインストール
+### Ubuntu/Debian Installation
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
@@ -31,7 +31,7 @@ sudo apt-get install -y \
     bpftool
 ```
 
-### RHEL/CentOS/Fedoraでのインストール
+### RHEL/CentOS/Fedora Installation
 ```bash
 sudo dnf install -y \
     clang \
@@ -41,121 +41,148 @@ sudo dnf install -y \
     bpftool
 ```
 
-## ビルド方法
+## Building
 
-1. リポジトリをクローン:
+1. Clone the repository:
 ```bash
 git clone <repository-url>
 cd php-dcr
 ```
 
-2. 依存関係を取得:
+2. Download dependencies:
 ```bash
 go mod download
 ```
 
-3. ビルド:
+3. Build:
 ```bash
 make build
 ```
 
-これにより以下が実行されます:
-- `vmlinux.h` の生成（カーネルBTFから）
-- eBPFプログラムのコンパイル (`bpf/php.bpf.o`)
-- Goバイナリのビルド (`php-dcr`)
+This will:
+- Generate `vmlinux.h` from kernel BTF
+- Compile the eBPF program (`bpf/php.bpf.o`)
+- Build the Go binary (`php-dcr`)
 
-## 使用方法
+## Usage
 
-1. プログラムを実行（root権限が必要）:
+### Basic Usage
+
+Run the program (requires root, `--target-dir` is required):
 ```bash
-sudo ./php-dcr
+sudo ./php-dcr --target-dir /var/www/html
 ```
 
-または:
-```bash
-sudo make run
+Only PHP files within the `--target-dir` directory will be tracked.
+
+### HTTP API
+
+After starting, an HTTP server runs on port 8080 with the following endpoints:
+
+#### GET /v1/report
+Returns a report of PHP files in the target directory and their compilation status.
+```json
+{
+  "script": {
+    "start_time_unix": 1733500000,
+    "start_time_rfc3339": "2024-12-06T12:00:00+09:00"
+  },
+  "report": [
+    {
+      "filepath": "/var/www/html/index.php",
+      "compiled_time_unix": 1733500100,
+      "compiled_time_rfc3339": "2024-12-06T12:01:40+09:00"
+    },
+    {
+      "filepath": "/var/www/html/unused.php",
+      "compiled_time_unix": -1,
+      "compiled_time_rfc3339": ""
+    }
+  ]
+}
+```
+- `compiled_time_unix: -1` indicates the file was never compiled (potential dead code)
+
+#### GET /v1/php_compiled_info
+Returns a mapping of compiled PHP file paths to their compilation timestamps.
+```json
+{
+  "/var/www/html/index.php": 1733500100,
+  "/var/www/html/config.php": 1733500105
+}
 ```
 
-2. プログラムは5秒ごとにPHPコンパイルファイルの統計情報を表示します:
-```
-=== PHP Compile File Statistics ===
-Filename                                                     Count
------------------------------------------------------------
-/var/www/html/index.php                                      42
-/var/www/html/config.php                                     15
-...
-
-Total unique files: 2
+#### GET /v1/php_file_list
+Returns a list of all PHP files in the target directory.
+```json
+[
+  "/var/www/html/index.php",
+  "/var/www/html/config.php",
+  "/var/www/html/unused.php"
+]
 ```
 
-3. 終了するには `Ctrl+C` を押してください
+### Stopping
 
-## プロジェクト構成
+Press `Ctrl+C` to exit.
+
+## Project Structure
 
 ```
 .
 ├── bpf/
-│   ├── php.bpf.c        # eBPFプログラム（USDTプローブ）
-│   ├── maps.bpf.h       # BPF MAPヘルパー関数
-│   └── vmlinux.h        # カーネル型定義（自動生成）
-├── main.go              # Goローダーとマップリーダー
-├── Makefile             # ビルドスクリプト
-├── go.mod               # Go依存関係
-└── README.md            # このファイル
+│   ├── php.bpf.c        # eBPF program (USDT probe)
+│   └── vmlinux.h        # Kernel type definitions (auto-generated)
+├── main.go              # Go application
+├── Makefile             # Build script
+├── go.mod               # Go dependencies
+└── README.md            # This file
 ```
 
-## 仕組み
+## How It Works
 
-1. **eBPFプログラム** (`bpf/php.bpf.c`):
-   - PHPの `compile__file__entry` USDTプローブにアタッチ
-   - コンパイルされたファイル名をキャプチャ
-   - LRU HASHマップ `php_compile_file_total` にカウントを保存
+1. **eBPF Program** (`bpf/php.bpf.c`):
+   - Attaches to PHP's `compile__file__return` USDT probe
+   - Captures compiled file names and timestamps
+   - Stores data in LRU HASH map `php_compile_file`
 
-2. **Goプログラム** (`main.go`):
-   - eBPFオブジェクトファイルをロード
-   - USDTプローブをアタッチ
-   - 5秒ごとにBPF MAPを読み取り
-   - ファイル名とコンパイルカウントを表示
+2. **Go Program** (`main.go`):
+   - Loads embedded eBPF object file
+   - Auto-discovers PHP binaries and attaches USDT probes
+   - Reads BPF MAP every 5 seconds and records compilation info
+   - Periodically updates the PHP file list in the target directory
+   - Provides reports via HTTP API
 
-## カスタマイズ
+3. **PHP Binary Auto-Discovery**:
+   Automatically searches for PHP binaries in:
+   - `/usr/lib/apache2/modules` (`libphp*`)
+   - `/usr/bin` (`php`, `php-fpm`)
 
-### PHPライブラリパスの変更
+## Troubleshooting
 
-`main.go`の以下の行を環境に合わせて修正してください:
-```go
-_, err = prog.AttachUSDT(-1, "/usr/lib/apache2/modules/libphp8.1.so", "php", "compile__file__entry")
-```
+### Failed to load eBPF program
+- Ensure running with root privileges
+- Verify kernel supports eBPF CO-RE (5.4+)
+- Check BTF is enabled: `ls /sys/kernel/btf/vmlinux`
 
-### ポーリング間隔の変更
+### Failed to attach USDT probe
+- Ensure PHP was built with USDT support
+- Check available probes: `sudo bpftool probe | grep php`
 
-`main.go`の以下の行でポーリング間隔を調整できます:
-```go
-ticker := time.NewTicker(5 * time.Second)  // 5秒から好きな値に変更
-```
+### No data displayed
+- Verify PHP application is actually running
+- Check that PHP is compiling files (opcache may be caching)
+- Ensure `--target-dir` points to the correct path
 
-## トラブルシューティング
+## Cleanup
 
-### eBPFプログラムのロードに失敗する
-- root権限で実行していることを確認
-- カーネルがeBPF CO-REをサポートしていることを確認（5.4以降）
-- BTFが有効になっていることを確認: `ls /sys/kernel/btf/vmlinux`
-
-### USDTプローブのアタッチに失敗する
-- PHPライブラリのパスが正しいことを確認
-- PHPがUSDTサポート付きでビルドされていることを確認
-- 利用可能なプローブを確認: `sudo bpftool probe | grep php`
-
-### データが表示されない
-- PHPアプリケーションが実際に実行されていることを確認
-- PHPがファイルをコンパイルしていることを確認（opcacheがキャッシュしている可能性）
-
-## クリーンアップ
-
-ビルド成果物を削除:
+Remove build artifacts:
 ```bash
 make clean
 ```
 
-## ライセンス
+## License
 
-GPL
+Apache License 2.0
+
+Note: The eBPF program (`bpf/*`) declares "GPL" license for kernel compatibility.
