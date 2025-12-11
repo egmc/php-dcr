@@ -275,6 +275,18 @@ func run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--target-dir must not be empty")
 	}
 
+	// Validate targetDir exists and is a directory
+	info, err := os.Stat(targetDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("--target-dir does not exist: %s", targetDir)
+		}
+		return fmt.Errorf("failed to access --target-dir: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("--target-dir is not a directory: %s", targetDir)
+	}
+
 	// Check if running as root
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("this program must be run as root (sudo)")
