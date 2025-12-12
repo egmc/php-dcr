@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/binary"
 	"encoding/json"
@@ -21,10 +22,69 @@ import (
 	"github.com/aquasecurity/libbpfgo"
 	bpf "github.com/aquasecurity/libbpfgo"
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
+	"go.opentelemetry.io/otel/log"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
 //go:embed bpf/php.bpf.o
 var bpfObject []byte
+
+// otelLogger is the OpenTelemetry logger for emitting logs via OTLP
+var otelLogger log.Logger
+
+// initOTLPLogger initializes the OTLP log exporter and logger
+// Configure endpoint via OTEL_EXPORTER_OTLP_ENDPOINT or OTEL_EXPORTER_OTLP_LOGS_ENDPOINT
+func initOTLPLogger(ctx context.Context) (func(context.Context) error, error) {
+	// Create OTLP HTTP log exporter
+	exporter, err := otlploghttp.New(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OTLP log exporter: %w", err)
+	}
+
+	// Create resource with service info
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceName("php-dcr"),
+			semconv.ServiceVersion("1.0.0"),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create resource: %w", err)
+	}
+
+	// Create log provider with batch processor
+	loggerProvider := sdklog.NewLoggerProvider(
+		sdklog.WithResource(res),
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(exporter)),
+	)
+
+	// Get logger instance
+	otelLogger = loggerProvider.Logger("php-dcr")
+
+	return loggerProvider.Shutdown, nil
+}
+
+// emitCompileLog emits a log record via OTLP with filename and compiletime
+func emitCompileLog(ctx context.Context, filename string, compiletime int64) {
+	if otelLogger == nil {
+		return
+	}
+
+	record := log.Record{}
+	record.SetTimestamp(time.Now())
+	record.SetSeverity(log.SeverityInfo)
+	record.SetBody(log.StringValue("PHP file compiled"))
+	record.AddAttributes(
+		log.String("php.filename", filename),
+		log.Int64("php.compile_time_unix", compiletime),
+		log.String("php.compile_time_rfc3339", time.Unix(compiletime, 0).Local().Format(time.RFC3339)),
+	)
+
+	otelLogger.Emit(ctx, record)
+}
 
 // searchDirs defines the directories to search for PHP binaries
 var searchDirs = []string{
@@ -270,6 +330,21 @@ func run(cmd *cobra.Command, args []string) error {
 	// Record script start time
 	scriptStartTime = time.Now()
 
+	ctx := context.Background()
+
+	// Initialize OTLP logger (optional - will log warning if OTEL endpoint not configured)
+	shutdownLogger, err := initOTLPLogger(ctx)
+	if err != nil {
+		slog.Warn("Failed to initialize OTLP logger, continuing without OTLP logging", "error", err)
+	} else {
+		defer func() {
+			if err := shutdownLogger(ctx); err != nil {
+				slog.Error("Failed to shutdown OTLP logger", "error", err)
+			}
+		}()
+		slog.Info("OTLP logger initialized")
+	}
+
 	// Validate targetDir is not empty
 	if targetDir == "" {
 		return fmt.Errorf("--target-dir must not be empty")
@@ -388,13 +463,13 @@ func run(cmd *cobra.Command, args []string) error {
 			return nil
 		case <-ticker.C:
 			// Read and display map contents
-			displayMapContents(bpfMap)
+			displayMapContents(ctx, bpfMap)
 		}
 	}
 }
 
 // displayMapContents reads and displays the contents of the BPF map
-func displayMapContents(bpfMap *bpf.BPFMap) {
+func displayMapContents(ctx context.Context, bpfMap *bpf.BPFMap) {
 	slog.Info("target directory", "target-dir", targetDir)
 	fmt.Println("\n=== PHP Compile File Statistics ===")
 	fmt.Printf("%-60s %s\n", "Filename", "Count")
@@ -424,9 +499,11 @@ func displayMapContents(bpfMap *bpf.BPFMap) {
 
 		// Store filepath and compiled_time_unix in global map only if it matches targetDir
 		if strings.HasPrefix(filename, targetDir) {
-			// slog.Info("matched", "filaname", filename)
 			phpCompiled[filename] = compiletime
 		}
+
+		// Emit OTLP log with filename and compiletime
+		emitCompileLog(ctx, filename, compiletime)
 
 		t := time.Unix(compiletime, 0)
 		// ローカルタイムゾーンに変換
