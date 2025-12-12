@@ -1,7 +1,10 @@
-.PHONY: all clean build ebpf go-build vmlinux
+.PHONY: all clean build ebpf go-build vmlinux build-libbpf
 
 # Default target
 all: vmlinux ebpf go-build
+
+build-libbpf:
+	make -C ./libbpf/src LIBSUBDIR=lib DESTDIR=../../dest/libbpf install install_uapi_headers
 
 # Generate vmlinux.h from kernel BTF
 vmlinux:
@@ -12,11 +15,13 @@ vmlinux:
 
 # eBPF compilation
 ebpf: vmlinux
-	clang -g -O2 -target bpf -D__TARGET_ARCH_x86_64 -I./bpf -c bpf/php.bpf.c -o bpf/php.bpf.o
+	clang -g -O2 -D__TARGET_ARCH_x86 -I./bpf  -I./dest/libbpf/usr/include -idirafter /usr/include/x86_64-linux-gnu -c bpf/php.bpf.c -target bpf -o bpf/php.bpf.o
 
 # Go build
 go-build:
-	go build -o php-dcr main.go
+	CGO_CFLAGS="-I$(CURDIR)/dest/libbpf/usr/include" \
+	CGO_LDFLAGS="-L$(CURDIR)/dest/libbpf/usr/lib -lbpf -lelf" \
+	go build -ldflags='-extldflags "-static"'
 
 # Build everything
 build: ebpf go-build
@@ -34,6 +39,7 @@ run: build
 # Help target
 help:
 	@echo "Available targets:"
+	@echo "  build-libbpf - Build and install libbpf to dest/libbpf"
 	@echo "  vmlinux   - Generate vmlinux.h from kernel BTF"
 	@echo "  ebpf      - Compile eBPF program"
 	@echo "  go-build  - Build Go binary"
