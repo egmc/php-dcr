@@ -31,16 +31,6 @@ sudo apt-get install -y \
     bpftool
 ```
 
-### RHEL/CentOS/Fedora Installation
-```bash
-sudo dnf install -y \
-    clang \
-    llvm \
-    libbpf-devel \
-    kernel-devel \
-    bpftool
-```
-
 ## Building
 
 1. Clone the repository:
@@ -125,19 +115,6 @@ Returns a list of all PHP files in the target directory.
 ### Stopping
 
 Press `Ctrl+C` to exit.
-
-## Project Structure
-
-```
-.
-├── bpf/
-│   ├── php.bpf.c        # eBPF program (USDT probe)
-│   └── vmlinux.h        # Kernel type definitions (auto-generated)
-├── main.go              # Go application
-├── Makefile             # Build script
-├── go.mod               # Go dependencies
-└── README.md            # This file
-```
 
 ## How It Works
 
