@@ -170,14 +170,22 @@ type ScriptInfo struct {
 }
 
 type FileReport struct {
-	Filepath           string `json:"filepath"`
-	CompiledTimeUnix   int64  `json:"compiled_time_unix"`
+	Filepath            string `json:"filepath"`
+	CompiledTimeUnix    int64  `json:"compiled_time_unix"`
 	CompiledTimeRFC3339 string `json:"compiled_time_rfc3339"`
 }
 
 type ReportResponse struct {
 	Script ScriptInfo   `json:"script"`
 	Report []FileReport `json:"report"`
+}
+
+// StatsResponse represents the stats endpoint response
+type StatsResponse struct {
+	UptimeSeconds    float64 `json:"uptime_seconds"`
+	TotalFiles       int     `json:"total_files"`
+	CompiledFiles    int     `json:"compiled_files"`
+	CodeCoverageRate float64 `json:"code_coverage_rate"`
 }
 
 // findPHPFiles recursively searches for PHP files in the given directory
@@ -290,8 +298,8 @@ func handleReport(w http.ResponseWriter, r *http.Request) {
 		}
 
 		reports = append(reports, FileReport{
-			Filepath:           filepath,
-			CompiledTimeUnix:   compiledTimeUnix,
+			Filepath:            filepath,
+			CompiledTimeUnix:    compiledTimeUnix,
 			CompiledTimeRFC3339: compiledTimeRFC3339,
 		})
 	}
@@ -302,6 +310,31 @@ func handleReport(w http.ResponseWriter, r *http.Request) {
 			StartTimeRFC3339: scriptStartTime.Format(time.RFC3339),
 		},
 		Report: reports,
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+// handleStats returns stats about the application
+func handleStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	totalFiles := len(getTargetFileList())
+	compiledFiles := len(phpCompiled)
+
+	var coverageRate float64
+	if totalFiles > 0 {
+		coverageRate = float64(compiledFiles) / float64(totalFiles) * 100
+	}
+
+	response := StatsResponse{
+		UptimeSeconds:    time.Since(scriptStartTime).Seconds(),
+		TotalFiles:       totalFiles,
+		CompiledFiles:    compiledFiles,
+		CodeCoverageRate: coverageRate,
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -447,6 +480,7 @@ func run(cmd *cobra.Command, args []string) error {
 	http.HandleFunc("/v1/php_compiled_info", handlePhpCompiledInfo)
 	http.HandleFunc("/v1/php_file_list", handlePhpFileList)
 	http.HandleFunc("/v1/report", handleReport)
+	http.HandleFunc("/v1/stats", handleStats)
 	go func() {
 		slog.Info("Starting HTTP server on :8080")
 		if err := http.ListenAndServe(":8080", nil); err != nil {
