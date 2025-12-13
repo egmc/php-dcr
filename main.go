@@ -152,6 +152,7 @@ const (
 )
 
 var targetDir string
+var emitLogEvents bool
 
 // targetFileList stores absolute paths of PHP files in targetDir (atomic for concurrent access)
 var targetFileList atomic.Value // stores []string
@@ -318,6 +319,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.Flags().StringVar(&targetDir, "target-dir", "", "Target directory to monitor")
 	rootCmd.MarkFlagRequired("target-dir")
+	rootCmd.Flags().BoolVar(&emitLogEvents, "emit-log-events", false, "Enable emitting log events via OTLP")
 }
 
 func main() {
@@ -332,17 +334,19 @@ func run(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
-	// Initialize OTLP logger (optional - will log warning if OTEL endpoint not configured)
-	shutdownLogger, err := initOTLPLogger(ctx)
-	if err != nil {
-		slog.Warn("Failed to initialize OTLP logger, continuing without OTLP logging", "error", err)
-	} else {
-		defer func() {
-			if err := shutdownLogger(ctx); err != nil {
-				slog.Error("Failed to shutdown OTLP logger", "error", err)
-			}
-		}()
-		slog.Info("OTLP logger initialized")
+	// Initialize OTLP logger only if --emit-log-events is enabled
+	if emitLogEvents {
+		shutdownLogger, err := initOTLPLogger(ctx)
+		if err != nil {
+			slog.Warn("Failed to initialize OTLP logger, continuing without OTLP logging", "error", err)
+		} else {
+			defer func() {
+				if err := shutdownLogger(ctx); err != nil {
+					slog.Error("Failed to shutdown OTLP logger", "error", err)
+				}
+			}()
+			slog.Info("OTLP logger initialized")
+		}
 	}
 
 	// Validate targetDir is not empty
