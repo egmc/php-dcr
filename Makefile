@@ -20,7 +20,7 @@ ebpf: vmlinux
 # Go build
 go-build:
 	CGO_CFLAGS="-I$(CURDIR)/dest/libbpf/usr/include" \
-	CGO_LDFLAGS="-L$(CURDIR)/dest/libbpf/usr/lib -lbpf -lelf" \
+	CGO_LDFLAGS="-L$(CURDIR)/dest/libbpf/usr/lib -lbpf -lelf -lzstd" \
 	go build -ldflags='-extldflags "-static"'
 
 # Build everything
