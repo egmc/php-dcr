@@ -450,9 +450,9 @@ func run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to get eBPF program: %w", err)
 	}
 
-	slog.Info("prog", prog.Name())
-	slog.Info("pin path", prog.PinPath())
-	slog.Info("section name", prog.SectionName())
+	slog.Info("prog", "name", prog.Name())
+	slog.Info("pin path", "path", prog.PinPath())
+	slog.Info("section name", "name", prog.SectionName())
 
 	// Find PHP binaries to attach to
 	phpBinaries, err := findPHPBinaries()
