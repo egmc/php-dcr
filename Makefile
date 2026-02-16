@@ -1,4 +1,4 @@
-.PHONY: all clean build ebpf go-build vmlinux build-libbpf
+.PHONY: all clean build ebpf go-build vmlinux build-libbpf test
 
 # Default target
 all: vmlinux ebpf go-build
@@ -26,6 +26,12 @@ go-build:
 # Build everything
 build: ebpf go-build
 
+# Run tests
+test:
+	CGO_CFLAGS="-I$(CURDIR)/dest/libbpf/usr/include" \
+	CGO_LDFLAGS="-L$(CURDIR)/dest/libbpf/usr/lib -lbpf -lelf -lzstd" \
+	go test -v ./...
+
 # Clean build artifacts
 clean:
 	rm -f bpf/*.o
@@ -46,4 +52,5 @@ help:
 	@echo "  build     - Build everything"
 	@echo "  all       - Build everything (default)"
 	@echo "  clean     - Remove build artifacts"
+	@echo "  test      - Run Go tests"
 	@echo "  run       - Build and run the program (requires root)"
