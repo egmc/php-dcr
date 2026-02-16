@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -153,6 +154,14 @@ const (
 
 var targetDir string
 var emitLogEvents bool
+var rewriteRuleFlags []string
+var rewriteRules []RewriteRule
+
+// RewriteRule holds a compiled regex and its replacement string
+type RewriteRule struct {
+	Regex       *regexp.Regexp
+	Replacement string
+}
 
 // targetFileList stores absolute paths of PHP files in targetDir (atomic for concurrent access)
 var targetFileList atomic.Value // stores []string
@@ -353,6 +362,8 @@ func init() {
 	rootCmd.Flags().StringVar(&targetDir, "target-dir", "", "Target directory to monitor")
 	rootCmd.MarkFlagRequired("target-dir")
 	rootCmd.Flags().BoolVar(&emitLogEvents, "emit-log-events", false, "Enable emitting log events via OTLP")
+	rootCmd.Flags().StringArrayVar(&rewriteRuleFlags, "compiled-path-rewrite-rule", nil,
+		"Rewrite rule for compiled file paths (format: regex::replacement, can be specified multiple times)")
 }
 
 func main() {
@@ -397,6 +408,16 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("--target-dir is not a directory: %s", targetDir)
+	}
+
+	// Parse rewrite rules
+	if len(rewriteRuleFlags) > 0 {
+		var err error
+		rewriteRules, err = parseRewriteRules(rewriteRuleFlags)
+		if err != nil {
+			return fmt.Errorf("failed to parse rewrite rules: %w", err)
+		}
+		slog.Info("Loaded path rewrite rules", "count", len(rewriteRules))
 	}
 
 	// Check if running as root
@@ -524,6 +545,15 @@ func displayMapContents(ctx context.Context, bpfMap *bpf.BPFMap) {
 		filename := cstring(keyBytes)
 		slog.Info(filename)
 
+		// Apply rewrite rules to filename
+		if len(rewriteRules) > 0 {
+			rewritten := applyRewriteRules(filename, rewriteRules)
+			if rewritten != filename {
+				slog.Info("Rewrote path", "original", filename, "rewritten", rewritten)
+				filename = rewritten
+			}
+		}
+
 		var n int64
 
 		buf := bytes.NewReader(v)
@@ -568,6 +598,31 @@ func cstring(b []byte) string {
 		}
 	}
 	return string(b)
+}
+
+// parseRewriteRules parses raw rule strings (format: "regex::replacement") into compiled RewriteRules
+func parseRewriteRules(rawRules []string) ([]RewriteRule, error) {
+	var rules []RewriteRule
+	for _, raw := range rawRules {
+		parts := strings.SplitN(raw, "::", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid rewrite rule (must contain '::'): %s", raw)
+		}
+		re, err := regexp.Compile(parts[0])
+		if err != nil {
+			return nil, fmt.Errorf("invalid regex in rewrite rule %q: %w", raw, err)
+		}
+		rules = append(rules, RewriteRule{Regex: re, Replacement: parts[1]})
+	}
+	return rules, nil
+}
+
+// applyRewriteRules applies rewrite rules sequentially to the filename
+func applyRewriteRules(filename string, rules []RewriteRule) string {
+	for _, rule := range rules {
+		filename = rule.Regex.ReplaceAllString(filename, rule.Replacement)
+	}
+	return filename
 }
 
 func getBootTimeUnix() (int64, error) {
