@@ -21,7 +21,13 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libelf-dev libzstd-dev linux-tools-common linux-tools-azure
+          sudo apt-get install -y clang llvm libelf-dev libzstd-dev
+
+      - name: Build bpftool from source
+        run: |
+          git clone --depth 1 --recurse-submodules https://github.com/libbpf/bpftool.git
+          make -C bpftool/src
+          sudo install bpftool/src/bpftool /usr/local/bin/
 
       - name: Build libbpf
         run: make build-libbpf
