@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libelf-dev libzstd-dev linux-tools-common linux-tools-$(uname -r)
+          sudo apt-get install -y clang llvm libelf-dev libzstd-dev linux-tools-common linux-tools-azure
 
       - name: Build libbpf
         run: make build-libbpf
