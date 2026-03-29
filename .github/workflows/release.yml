@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libelf-dev libzstd-dev linux-tools-common linux-tools-$(uname -r)
+
+      - name: Build libbpf
+        run: make build-libbpf
+
+      - name: Generate vmlinux.h
+        run: make vmlinux
+
+      - name: Build eBPF program
+        run: make ebpf
+
+      - name: Build binary
+        run: make go-build
+
+      - name: Create release archive
+        run: tar czf php-dcr-linux-amd64.tar.gz php-dcr
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: php-dcr-linux-amd64.tar.gz

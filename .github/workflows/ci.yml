@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libelf-dev libzstd-dev linux-tools-common linux-tools-$(uname -r)
+
+      - name: Build libbpf
+        run: make build-libbpf
+
+      - name: Generate vmlinux.h
+        run: make vmlinux
+
+      - name: Build eBPF program
+        run: make ebpf
+
+      - name: Run tests
+        run: make test
+
+      - name: Build binary
+        run: make go-build
