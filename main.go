@@ -536,11 +536,16 @@ func displayMapContents(ctx context.Context, bpfMap *bpf.BPFMap) {
 
 	iter := bpfMap.Iterator()
 	count := 0
+	var keysToDelete [][]byte
 
 	for iter.Next() {
 		keyBytes := iter.Key()
 
-		v, _ := bpfMap.GetValue(unsafe.Pointer(&keyBytes[0]))
+		v, err := bpfMap.GetValue(unsafe.Pointer(&keyBytes[0]))
+		if err != nil {
+			slog.Warn("Failed to get value from BPF map", "error", err)
+			continue
+		}
 
 		filename := cstring(keyBytes)
 		slog.Info(filename)
@@ -557,9 +562,9 @@ func displayMapContents(ctx context.Context, bpfMap *bpf.BPFMap) {
 		var n int64
 
 		buf := bytes.NewReader(v)
-		err := binary.Read(buf, binary.LittleEndian, &n)
-		if err != nil {
-			panic(err)
+		if err := binary.Read(buf, binary.LittleEndian, &n); err != nil {
+			slog.Warn("Failed to read timestamp from BPF map value", "filename", filename, "error", err, "value_len", len(v))
+			continue
 		}
 
 		boottime, _ := getBootTimeUnix()
@@ -578,10 +583,17 @@ func displayMapContents(ctx context.Context, bpfMap *bpf.BPFMap) {
 		tLocal := t.Local()
 		slog.Info(tLocal.Format(time.RFC3339))
 
-		bpfMap.DeleteKey(unsafe.Pointer(&keyBytes[0]))
-		slog.Info(filename + " deleted")
+		// Collect key for deletion after iteration
+		keyCopy := make([]byte, len(keyBytes))
+		copy(keyCopy, keyBytes)
+		keysToDelete = append(keysToDelete, keyCopy)
 		count++
 
+	}
+
+	// Delete keys after iteration to avoid corrupting the iterator
+	for _, key := range keysToDelete {
+		bpfMap.DeleteKey(unsafe.Pointer(&key[0]))
 	}
 
 	if count == 0 {
