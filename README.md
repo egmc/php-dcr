@@ -56,6 +56,49 @@ This will:
 
 ## Usage
 
+### Prerequisites
+
+The target PHP process must have the `USE_ZEND_DTRACE=1` environment variable set. This enables USDT probes in the PHP runtime, which php-dcr uses to trace file compilation events.
+
+#### Apache (systemd drop-in)
+
+Create `/etc/systemd/system/apache2.service.d/dtrace.conf`:
+
+```ini
+[Service]
+Environment=USE_ZEND_DTRACE=1
+```
+
+You may need to preserve another variable that already set (like Ubuntu setting)
+
+```ini
+[Service]
+Environment=APACHE_STARTED_BY_SYSTEMD=true USE_ZEND_DTRACE=1
+```
+
+Then reload and restart:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart apache2
+```
+
+#### PHP-FPM (systemd drop-in)
+
+Create `/etc/systemd/system/php-fpm.service.d/dtrace.conf` (or `php8.3-fpm.service.d` etc. depending on your version):
+
+```ini
+[Service]
+Environment=USE_ZEND_DTRACE=1
+```
+
+Then reload and restart:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart php-fpm
+```
+
 ### Basic Usage
 
 Run the program (requires root, `--target-dir` is required):
