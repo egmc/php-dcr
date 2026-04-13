@@ -4,6 +4,16 @@
 
 #define MAX_STR_LEN 512
 
+#ifdef DEBUG
+#define debug_printk(fmt, ...)                              \
+    ({                                                      \
+        static const char ____fmt[] = fmt;                  \
+        bpf_trace_printk(____fmt, sizeof(____fmt), ##__VA_ARGS__); \
+    })
+#else
+#define debug_printk(fmt, ...) ((void)0)
+#endif
+
 char filename[MAX_STR_LEN];
 
 
@@ -19,8 +29,7 @@ int BPF_USDT(compile_file_return, char *arg0, char *arg1)
 {
     u64 ts = bpf_ktime_get_ns();
 
-    static const char fmtstr[] = "compile file return: %s, %s\n"; 
-    bpf_trace_printk(fmtstr, sizeof(fmtstr), arg0, arg1);
+    debug_printk("compile file return: %s, %s\n", arg0, arg1);
 
 
     bpf_probe_read_user_str(&filename, sizeof(filename), arg0);
