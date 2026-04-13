@@ -1,4 +1,6 @@
-.PHONY: all clean build ebpf go-build vmlinux build-libbpf test
+.PHONY: all clean build ebpf ebpf-debug go-build vmlinux build-libbpf test debug
+
+EBPF_CFLAGS ?=
 
 # Default target
 all: vmlinux ebpf go-build
@@ -15,7 +17,14 @@ vmlinux:
 
 # eBPF compilation
 ebpf: vmlinux
-	clang -g -O2 -D__TARGET_ARCH_x86 -I./bpf  -I./dest/libbpf/usr/include -idirafter /usr/include/x86_64-linux-gnu -c bpf/php.bpf.c -target bpf -o bpf/php.bpf.o
+	clang -g -O2 -D__TARGET_ARCH_x86 $(EBPF_CFLAGS) -I./bpf  -I./dest/libbpf/usr/include -idirafter /usr/include/x86_64-linux-gnu -c bpf/php.bpf.c -target bpf -o bpf/php.bpf.o
+
+# eBPF compilation with debug (enables bpf_trace_printk)
+ebpf-debug:
+	$(MAKE) ebpf EBPF_CFLAGS=-DDEBUG
+
+# Debug build (eBPF with -DDEBUG + go binary)
+debug: ebpf-debug go-build
 
 # Go build
 go-build:
