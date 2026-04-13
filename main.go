@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -534,16 +535,31 @@ func displayMapContents(ctx context.Context, bpfMap *bpf.BPFMap) {
 	fmt.Printf("%-60s %s\n", "Filename", "Count")
 	fmt.Println("-----------------------------------------------------------")
 
+	// Cap iteration well below the BPF map's max_entries (see bpf/php.bpf.c).
+	// Under heavy concurrent inserts, bpf_map_get_next_key on an LRU hash
+	// can keep returning newly inserted keys and never terminate.
+	// Remaining entries are picked up on the next tick.
+	const maxIter = 10000
+
 	iter := bpfMap.Iterator()
 	count := 0
+	iterated := 0
 	var keysToDelete [][]byte
 
 	for iter.Next() {
+		if iterated >= maxIter {
+			slog.Warn("Reached BPF map iteration cap; remaining entries will be read on next tick", "cap", maxIter)
+			break
+		}
+		iterated++
 		keyBytes := iter.Key()
 
 		v, err := bpfMap.GetValue(unsafe.Pointer(&keyBytes[0]))
 		if err != nil {
-			slog.Warn("Failed to get value from BPF map", "error", err)
+			// ENOENT is expected under LRU eviction between Next() and GetValue().
+			if !errors.Is(err, syscall.ENOENT) {
+				slog.Warn("Failed to get value from BPF map", "error", err)
+			}
 			continue
 		}
 

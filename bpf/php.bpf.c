@@ -29,7 +29,9 @@ int BPF_USDT(compile_file_return, char *arg0, char *arg1)
 {
     u64 ts = bpf_ktime_get_ns();
 
-    debug_printk("compile file return: %s, %s\n", arg0, arg1);
+    char comm[16];
+    bpf_get_current_comm(&comm, sizeof(comm));
+    debug_printk("compile file return: comm=%s, %s, %s\n", comm, arg0, arg1);
 
 
     bpf_probe_read_user_str(&filename, sizeof(filename), arg0);
