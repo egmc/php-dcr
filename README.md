@@ -110,7 +110,7 @@ Only PHP files within the `--target-dir` directory will be tracked.
 
 ### HTTP API
 
-After starting, an HTTP server runs on port 8080 with the following endpoints:
+After starting, an HTTP server runs on port 8080 by default (configurable via `--listen`) with the following endpoints:
 
 #### GET /v1/report
 Returns a report of PHP files in the target directory and their compilation status.

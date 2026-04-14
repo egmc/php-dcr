@@ -156,6 +156,7 @@ const (
 var targetDir string
 var emitLogEvents bool
 var rewriteRuleFlags []string
+var listenAddr string
 var rewriteRules []RewriteRule
 
 // RewriteRule holds a compiled regex and its replacement string
@@ -365,6 +366,8 @@ func init() {
 	rootCmd.Flags().BoolVar(&emitLogEvents, "emit-log-events", false, "Enable emitting log events via OTLP")
 	rootCmd.Flags().StringArrayVar(&rewriteRuleFlags, "compiled-path-rewrite-rule", nil,
 		"Rewrite rule for compiled file paths (format: regex::replacement, can be specified multiple times)")
+	rootCmd.Flags().StringVar(&listenAddr, "listen", ":8080",
+		"HTTP server listen address (format: [host]:port, e.g. :8080, 127.0.0.1:8080, 0.0.0.0:9000)")
 }
 
 func main() {
@@ -504,8 +507,8 @@ func run(cmd *cobra.Command, args []string) error {
 	http.HandleFunc("/v1/report", handleReport)
 	http.HandleFunc("/v1/stats", handleStats)
 	go func() {
-		slog.Info("Starting HTTP server on :8080")
-		if err := http.ListenAndServe(":8080", nil); err != nil {
+		slog.Info("Starting HTTP server", "listen", listenAddr)
+		if err := http.ListenAndServe(listenAddr, nil); err != nil {
 			slog.Error("HTTP server error", "error", err)
 		}
 	}()
